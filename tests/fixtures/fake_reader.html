@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head><title>Fake Kindle Reader</title></head>
+<body>
+  <div id="kindle-reader-content">
+    <div class="page" id="page-1">
+      <h2>Chapter 1: The Beginning</h2>
+      <p>This is the first page of our test book. It contains enough text to be considered meaningful by the extractor threshold.</p>
+    </div>
+  </div>
+  <script>
+    let currentPage = 1;
+    const pages = [
+      {heading: 'Chapter 1: The Beginning', text: 'This is the first page of our test book. It contains enough text to be considered meaningful by the extractor threshold.'},
+      {heading: null, text: 'This is the second page with more content. The story continues with interesting developments and plot twists.'},
+      {heading: 'Chapter 2: The Middle', text: 'Chapter two begins here. New adventures await our protagonist in this exciting chapter.'},
+      {heading: null, text: 'The final page of our test book. Everything wraps up nicely with a satisfying conclusion.'},
+    ];
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' && currentPage < pages.length) {
+        currentPage++;
+        const page = pages[currentPage - 1];
+        const container = document.getElementById('kindle-reader-content');
+        container.innerHTML = `<div class="page" id="page-${currentPage}">
+          ${page.heading ? `<h2>${page.heading}</h2>` : ''}
+          <p>${page.text}</p>
+        </div>`;
+      }
+    });
+  </script>
+</body>
+</html>
