@@ -149,6 +149,12 @@ class BrowserDriver:
             except Exception:
                 pass
         if self._lightpanda_proc:
-            self._lightpanda_proc.terminate()
-            self._lightpanda_proc.wait(timeout=5)
-            self._lightpanda_proc = None
+            try:
+                self._lightpanda_proc.terminate()
+                self._lightpanda_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._lightpanda_proc.kill()
+            except Exception:
+                pass
+            finally:
+                self._lightpanda_proc = None
