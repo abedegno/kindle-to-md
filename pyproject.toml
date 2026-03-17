@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kindle-to-md"
+version = "0.1.0"
+description = "Extract Kindle ebooks to Markdown via browser automation"
+requires-python = ">=3.11"
+dependencies = [
+    "playwright>=1.40",
+    "click>=8.1",
+    "pytesseract>=0.3.10",
+    "Pillow>=10.0",
+]
+
+[project.scripts]
+kindle-to-md = "kindle_to_md.cli:main"
