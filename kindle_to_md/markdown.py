@@ -1,5 +1,6 @@
 """Markdown formatting and assembly for extracted Kindle content."""
 
+import re
 from pathlib import Path
 
 from kindle_to_md.extractor import PageContent
@@ -42,6 +43,7 @@ def format_page(content: PageContent, prev_text: str) -> str:
         text = remove_overlap(prev_text, text)
 
     if text:
+        text = _add_headings(text)
         parts.append(text)
 
     for img_path in content.images:
@@ -51,6 +53,42 @@ def format_page(content: PageContent, prev_text: str) -> str:
     parts.append(PAGE_MARKER.format(page_number=content.page_number))
 
     return "\n\n".join(parts)
+
+
+def _add_headings(text: str) -> str:
+    """Detect heading-like lines in OCR text and format as Markdown headings.
+
+    Conservative approach: only format lines that are clearly structural
+    (question numbers, correct answers, explanations). Avoids false positives
+    from answer choices like "A) True" or short content lines.
+    """
+    lines = text.split("\n")
+    result = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            result.append(line)
+            continue
+
+        is_heading = False
+
+        # Pattern: "Question N:" or "Question N." at start of line
+        if re.match(r"^Question\s+\d+[\s:.]", stripped):
+            result.append(f"\n### {stripped}")
+            is_heading = True
+        # Pattern: "Correct Answer:" line
+        elif stripped.startswith("Correct Answer:"):
+            result.append(f"\n**{stripped}**")
+            is_heading = True
+        # Pattern: "Explanation:" at start
+        elif stripped.startswith("Explanation:"):
+            result.append(f"\n**Explanation:** {stripped[12:].strip()}")
+            is_heading = True
+
+        if not is_heading:
+            result.append(line)
+
+    return "\n".join(result)
 
 
 def append_page(output_path: Path, formatted_text: str) -> None:
