@@ -89,9 +89,11 @@ projects/
 
 Fast (~0.6s/page), works everywhere, plain text output. Good for books with simple formatting.
 
-### Qwen2.5-VL via MLX (recommended for Apple Silicon)
+### Qwen2.5-VL via MLX (Apple Silicon only)
 
 Slower (~11s/page) but produces structured Markdown with proper headings, bold text, code formatting, and tables. Runs natively on M-series GPU via MLX.
+
+**Note:** This backend requires an Apple Silicon Mac (M1/M2/M3/M4). For other platforms, use `--ocr tesseract`.
 
 Requires: `pip install -e ".[mlx]"`
 
