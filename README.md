@@ -63,7 +63,7 @@ kindle-to-md [ASIN] [OPTIONS]
 | `ASIN` | — | Amazon book ID or full Kindle URL |
 | `-o, --output` | `projects/{ASIN}/book.md` | Output file path |
 | `--region` | `co.uk` | Amazon region (co.uk, com, de, etc.) |
-| `--ocr` | `tesseract` | OCR engine: `tesseract` or `mlx` |
+| `--ocr` | `tesseract` | OCR engine: `tesseract`, `vlm`, `mlx`, `ollama` |
 | `--login` | — | Open browser for Amazon login, then exit |
 | `--reprocess` | — | Re-run OCR on cached screenshots |
 | `--resume` | — | Resume interrupted extraction |
@@ -85,17 +85,38 @@ projects/
 
 ## OCR Backends
 
+| Backend | Flag | Speed | Quality | Platform |
+|---------|------|-------|---------|----------|
+| Tesseract | `--ocr tesseract` | ~0.6s/page | Plain text | Any |
+| VLM (auto) | `--ocr vlm` | ~11s/page | Structured markdown | Any (see below) |
+| MLX | `--ocr mlx` | ~11s/page | Structured markdown | Apple Silicon only |
+| Ollama | `--ocr ollama` | ~15s/page | Structured markdown | Any |
+
 ### Tesseract (default)
 
-Fast (~0.6s/page), works everywhere, plain text output. Good for books with simple formatting.
+Fast, works everywhere, plain text output. Good for books with simple formatting.
 
-### Qwen2.5-VL via MLX (Apple Silicon only)
+### VLM — Vision Language Model (recommended)
 
-Slower (~11s/page) but produces structured Markdown with proper headings, bold text, code formatting, and tables. Runs natively on M-series GPU via MLX.
+`--ocr vlm` auto-detects the best available VLM backend:
+- **Apple Silicon** → MLX (fastest, runs on M-series GPU)
+- **Any platform** → Ollama (requires ollama to be running)
 
-**Note:** This backend requires an Apple Silicon Mac (M1/M2/M3/M4). For other platforms, use `--ocr tesseract`.
+Both use Qwen2.5-VL to produce structured Markdown with proper headings, bold text, code formatting, and tables.
 
-Requires: `pip install -e ".[mlx]"`
+### Setup: MLX (Apple Silicon)
+
+```bash
+pip install -e ".[mlx]"
+```
+
+### Setup: Ollama (any platform)
+
+1. Install ollama: https://ollama.com
+2. Pull the model: `ollama pull qwen2.5-vl`
+3. Start the server: `ollama serve`
+
+You can configure the ollama endpoint via `OLLAMA_HOST` (default: `http://localhost:11434`) and model via `OLLAMA_MODEL` (default: `qwen2.5-vl`).
 
 ## Post-Processing
 

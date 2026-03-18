@@ -28,7 +28,7 @@ def resolve_project_dir(asin: str, base: Path = Path(".")) -> Path:
 @click.option("--reauth", is_flag=True, help="Force fresh login")
 @click.option("--resume", is_flag=True, help="Resume from existing partial output")
 @click.option("--reprocess", is_flag=True, help="Re-run OCR on cached screenshots (no browser needed)")
-@click.option("--ocr", default="tesseract", type=click.Choice(["tesseract", "mlx"]), help="OCR engine (mlx uses Qwen2.5-VL)")
+@click.option("--ocr", default="tesseract", type=click.Choice(["tesseract", "vlm", "mlx", "ollama"]), help="OCR engine: tesseract, vlm (auto-detect), mlx (Apple Silicon), ollama")
 @click.option("--headed", is_flag=True, help="Run browser in headed mode (visible window)")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose logging")
 def main(asin, output, region, timeout, delay, login, reauth, resume, reprocess, ocr, headed, verbose):
@@ -137,11 +137,7 @@ def _reprocess_screenshots(images_dir: Path, output_path: Path, engine: str = "t
         page_num = int(img_path.stem.split("-")[1])
         screenshot_bytes = img_path.read_bytes()
 
-        if engine == "mlx":
-            from kindle_to_md.ocr import ocr_screenshot as _ocr
-            text = _ocr(screenshot_bytes, engine="mlx")
-        else:
-            text = ocr_screenshot(screenshot_bytes, engine="tesseract")
+        text = ocr_screenshot(screenshot_bytes, engine=engine)
 
         content = PageContent(
             text=text,
@@ -150,7 +146,8 @@ def _reprocess_screenshots(images_dir: Path, output_path: Path, engine: str = "t
             page_number=page_num,
         )
 
-        if engine == "mlx":
+        is_vlm = engine in ("mlx", "ollama", "vlm")
+        if is_vlm:
             from kindle_to_md.markdown import append_page as _ap, PAGE_MARKER
             parts = [text]
             parts.append(PAGE_MARKER.format(page_number=content.page_number))
