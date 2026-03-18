@@ -1,11 +1,13 @@
 [build-system]
-requires = ["setuptools>=68.0", "setuptools-scm"]
+requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "kindle-to-md"
 version = "0.1.0"
-description = "Extract Kindle ebooks to Markdown via browser automation"
+description = "Extract Kindle ebooks to Markdown via browser automation and OCR"
+readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.11"
 dependencies = [
     "playwright>=1.40",
@@ -14,5 +16,19 @@ dependencies = [
     "Pillow>=10.0",
 ]
 
+[project.optional-dependencies]
+mlx = [
+    "mlx-vlm>=0.4",
+    "transformers>=4.45",
+    "huggingface-hub>=0.20",
+]
+
+[tool.setuptools.packages.find]
+include = ["kindle_to_md*"]
+
 [project.scripts]
 kindle-to-md = "kindle_to_md.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/jonw/kindle-to-md"
+Issues = "https://github.com/jonw/kindle-to-md/issues"

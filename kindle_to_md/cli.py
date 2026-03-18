@@ -19,25 +19,24 @@ def resolve_project_dir(asin: str, base: Path = Path(".")) -> Path:
 
 
 @click.command()
-@click.argument("asin")
-@click.option("-o", "--output", default=None, help="Output file path (default: {ASIN}.md)")
-@click.option("-b", "--backend", default="lightpanda", type=click.Choice(["lightpanda", "chromium"]), help="Browser backend")
+@click.argument("asin", required=False)
+@click.option("-o", "--output", default=None, help="Output file path (default: projects/{ASIN}/book.md)")
 @click.option("--region", default="co.uk", help="Amazon region (co.uk, com, de, etc.)")
 @click.option("--timeout", default=300, help="Auth timeout in seconds")
 @click.option("--delay", default=1.0, help="Delay between page turns in seconds")
+@click.option("--login", is_flag=True, help="Open browser for Amazon login, then exit")
 @click.option("--reauth", is_flag=True, help="Force fresh login")
 @click.option("--resume", is_flag=True, help="Resume from existing partial output")
-@click.option("--reprocess", is_flag=True, help="Re-run OCR and formatting on cached screenshots (no browser needed)")
-@click.option("--ocr", default="tesseract", type=click.Choice(["tesseract", "mlx"]), help="OCR engine (mlx uses Qwen2.5-VL for markdown output)")
-@click.option("--headed", is_flag=True, help="Run extraction browser in headed mode (visible window)")
+@click.option("--reprocess", is_flag=True, help="Re-run OCR on cached screenshots (no browser needed)")
+@click.option("--ocr", default="tesseract", type=click.Choice(["tesseract", "mlx"]), help="OCR engine (mlx uses Qwen2.5-VL)")
+@click.option("--headed", is_flag=True, help="Run browser in headed mode (visible window)")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose logging")
-def main(asin: str, output: str, backend: str, region: str, timeout: int, delay: float, reauth: bool, resume: bool, reprocess: bool, ocr: str, headed: bool, verbose: bool):
+def main(asin, output, region, timeout, delay, login, reauth, resume, reprocess, ocr, headed, verbose):
     """Extract a Kindle ebook to Markdown.
 
     ASIN is the Amazon book identifier (e.g., B0G6MF376S).
     You can also pass a full Kindle URL — the ASIN will be extracted.
     """
-    # Set up logging
     log_level = logging.DEBUG if verbose else logging.WARNING
     logging.basicConfig(
         level=log_level,
@@ -45,11 +44,24 @@ def main(asin: str, output: str, backend: str, region: str, timeout: int, delay:
         stream=sys.stderr,
     )
 
+    # Login-only mode
+    if login:
+        driver = BrowserDriver(region=region, headed=True)
+        try:
+            driver.login(timeout=timeout)
+            print("Session saved. You can now extract books.", file=sys.stderr)
+        finally:
+            driver.shutdown()
+        return
+
+    # ASIN is required for all other modes
+    if not asin:
+        raise click.UsageError("ASIN is required (or use --login)")
+
     # Extract ASIN from URL if needed
     if "asin=" in asin:
         asin = asin.split("asin=")[1].split("&")[0]
     elif "/" in asin:
-        # Try to find ASIN-like pattern
         parts = asin.split("/")
         for part in parts:
             if part.startswith("B0") and len(part) == 10:
@@ -60,16 +72,12 @@ def main(asin: str, output: str, backend: str, region: str, timeout: int, delay:
     images_dir = project_dir / "images"
     output_path = Path(output) if output else project_dir / "book.md"
 
-    # Re-process mode: re-run OCR + formatting on cached screenshots
+    # Re-process mode: re-run OCR on cached screenshots
     if reprocess:
         _reprocess_screenshots(images_dir, output_path, ocr)
         return
 
-    driver = BrowserDriver(
-        backend=backend,
-        region=region,
-        headed=headed,
-    )
+    driver = BrowserDriver(region=region, headed=headed)
 
     try:
         # Handle auth
@@ -77,8 +85,7 @@ def main(asin: str, output: str, backend: str, region: str, timeout: int, delay:
         if reauth or not session_file.exists():
             print("Login required. Opening browser...", file=sys.stderr)
             driver.login(timeout=timeout)
-            # Re-create driver for extraction
-            driver = BrowserDriver(backend=backend, region=region, headed=headed)
+            driver = BrowserDriver(region=region, headed=headed)
 
         # Determine resume point
         resume_from = 0
@@ -86,10 +93,8 @@ def main(asin: str, output: str, backend: str, region: str, timeout: int, delay:
             resume_from = count_existing_pages(str(output_path))
             print(f"Resuming from page {resume_from}...", file=sys.stderr)
         elif not resume and output_path.exists():
-            # Start fresh
             output_path.unlink()
 
-        # Launch extraction browser
         page = driver.launch()
 
         extract_book(
@@ -108,8 +113,6 @@ def main(asin: str, output: str, backend: str, region: str, timeout: int, delay:
         print("\n\nInterrupted. Partial output saved.", file=sys.stderr)
     except Exception as e:
         print(f"\nError: {e}", file=sys.stderr)
-        if backend == "lightpanda":
-            print("Tip: try --backend chromium if Lightpanda isn't working.", file=sys.stderr)
         sys.exit(1)
     finally:
         driver.shutdown()
@@ -126,7 +129,6 @@ def _reprocess_screenshots(images_dir: Path, output_path: Path, engine: str = "t
         print(f"No screenshots found in {images_dir}", file=sys.stderr)
         sys.exit(1)
 
-    # Start fresh
     output_path.unlink(missing_ok=True)
 
     print(f"Re-processing {len(pages)} screenshots with {engine}...", file=sys.stderr)
@@ -136,7 +138,6 @@ def _reprocess_screenshots(images_dir: Path, output_path: Path, engine: str = "t
         screenshot_bytes = img_path.read_bytes()
 
         if engine == "mlx":
-            # MLX VLM returns markdown directly — no need for heading detection
             from kindle_to_md.ocr import ocr_screenshot as _ocr
             text = _ocr(screenshot_bytes, engine="mlx")
         else:
@@ -149,11 +150,9 @@ def _reprocess_screenshots(images_dir: Path, output_path: Path, engine: str = "t
             page_number=page_num,
         )
 
-        # For MLX, skip heading detection — the VLM handles formatting
         if engine == "mlx":
             from kindle_to_md.markdown import append_page as _ap, PAGE_MARKER
             parts = [text]
-            parts.append(f"\n![]({content.images[0]})\n")
             parts.append(PAGE_MARKER.format(page_number=content.page_number))
             _ap(output_path, "\n\n".join(parts))
         else:

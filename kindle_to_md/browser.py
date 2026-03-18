@@ -1,65 +1,76 @@
-"""Browser driver abstraction — Lightpanda or Chromium via Playwright CDP."""
+"""Browser driver abstraction — Chromium via Playwright."""
 
 import json
-import subprocess
+import logging
 import sys
 import time
 from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
 
+log = logging.getLogger("kindle-to-md")
+
 
 class BrowserDriver:
     def __init__(
         self,
-        backend: str = "lightpanda",
         session_dir: Path | None = None,
         region: str = "co.uk",
-        lightpanda_bin: str = "./lightpanda",
+        headed: bool = False,
     ):
-        self.backend = backend
         self.session_dir = session_dir or Path.home() / ".kindle-to-md" / "sessions"
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.region = region
-        self.lightpanda_bin = lightpanda_bin
+        self.headed = headed
 
         self._playwright = None
         self._browser = None
         self._context = None
-        self._lightpanda_proc = None
 
     def launch(self) -> Page:
         """Start the browser and return a Playwright Page with saved session loaded."""
+        log.info(f"Launching Chromium (headed={self.headed})")
         self._playwright = sync_playwright().start()
-
-        if self.backend == "lightpanda":
-            return self._launch_lightpanda()
-        elif self.backend == "chromium":
-            return self._launch_chromium(headed=False)
-        else:
-            raise ValueError(f"Unknown backend: {self.backend}")
+        return self._launch_chromium(headed=self.headed)
 
     def login(self, timeout: int = 300) -> None:
         """Launch Chromium in headed mode for manual Amazon login, then save session."""
         self._playwright = sync_playwright().start()
         page = self._launch_chromium(headed=True)
 
-        login_url = f"https://www.amazon.{self.region}/ap/signin"
-        page.goto(login_url)
+        # Navigate to the Kindle Cloud Reader — this will redirect to Amazon signin
+        login_url = f"https://read.amazon.{self.region}/"
+        log.info(f"Navigating to {login_url} (will redirect to login)")
+        page.goto(login_url, wait_until="commit")
+
+        # Wait for signin redirect
+        log.info("Waiting for signin redirect...")
+        try:
+            page.wait_for_url(lambda url: "/ap/" in url or "signin" in url, timeout=15000)
+            log.info(f"On signin page: {page.url}")
+        except Exception:
+            log.info(f"No signin redirect, current URL: {page.url}")
 
         print(
             f"Please log in to Amazon in the browser window.\n"
-            f"Waiting up to {timeout}s for authentication...",
+            f"Once you reach the Kindle library, the browser will close automatically.\n"
+            f"Waiting up to {timeout}s...",
             file=sys.stderr,
         )
 
-        # Wait until we land on a non-signin page
-        try:
-            page.wait_for_url(
-                lambda url: "/ap/signin" not in url and "/ap/mfa" not in url,
-                timeout=timeout * 1000,
-            )
-        except Exception:
+        # Wait until the browser is on read.amazon (login complete)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                current_url = page.evaluate("window.location.href")
+            except Exception:
+                current_url = page.url
+            log.debug(f"Browser URL: {current_url}")
+            if f"read.amazon.{self.region}" in current_url and "/ap/" not in current_url:
+                time.sleep(3)
+                break
+            time.sleep(2)
+        else:
             self.shutdown()
             raise TimeoutError("Login timed out. Please try again.")
 
@@ -67,51 +78,24 @@ class BrowserDriver:
         self._save_session()
         self.shutdown()
 
-    def _launch_lightpanda(self) -> Page:
-        """Start Lightpanda subprocess and connect via CDP."""
-        self._lightpanda_proc = subprocess.Popen(
-            [
-                self.lightpanda_bin,
-                "serve",
-                "--host", "127.0.0.1",
-                "--port", "9222",
-                "--timeout", "300",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        # Wait for CDP endpoint to be ready
-        deadline = time.time() + 10
-        while time.time() < deadline:
-            try:
-                import urllib.request
-                resp = urllib.request.urlopen("http://127.0.0.1:9222/json/version")
-                info = json.loads(resp.read())
-                ws_url = info.get("webSocketDebuggerUrl", "ws://127.0.0.1:9222")
-                break
-            except Exception:
-                time.sleep(0.5)
-        else:
-            self.shutdown()
-            raise ConnectionError(
-                "Lightpanda failed to start within 10s. "
-                "Try --backend chromium instead."
-            )
-
-        self._browser = self._playwright.chromium.connect_over_cdp(ws_url)
-        self._context = self._browser.contexts[0] if self._browser.contexts else self._browser.new_context()
-        self._load_session()
-        return self._context.new_page()
-
     def _launch_chromium(self, headed: bool = False) -> Page:
         """Launch Chromium via Playwright."""
+        log.info(f"Starting Chromium (headless={not headed})")
         self._browser = self._playwright.chromium.launch(headless=not headed)
+        # Narrow + tall viewport: forces single-column and reduces page overflow
+        context_opts = {
+            "viewport": {"width": 600, "height": 1800},
+        }
         session_file = self._session_file()
         if session_file.exists():
-            self._context = self._browser.new_context(storage_state=str(session_file))
+            log.info(f"Loading session from {session_file}")
+            state = json.loads(session_file.read_text())
+            log.info(f"Session has {len(state.get('cookies', []))} cookies, "
+                      f"{len(state.get('origins', []))} localStorage origins")
+            context_opts["storage_state"] = str(session_file)
         else:
-            self._context = self._browser.new_context()
+            log.info("No session file found, starting fresh context")
+        self._context = self._browser.new_context(**context_opts)
         return self._context.new_page()
 
     def _session_file(self) -> Path:
@@ -132,7 +116,7 @@ class BrowserDriver:
                 self._context.add_cookies(state["cookies"])
 
     def shutdown(self) -> None:
-        """Close browser and any subprocesses."""
+        """Close browser."""
         if self._context:
             try:
                 self._context.close()
@@ -148,13 +132,3 @@ class BrowserDriver:
                 self._playwright.stop()
             except Exception:
                 pass
-        if self._lightpanda_proc:
-            try:
-                self._lightpanda_proc.terminate()
-                self._lightpanda_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._lightpanda_proc.kill()
-            except Exception:
-                pass
-            finally:
-                self._lightpanda_proc = None
